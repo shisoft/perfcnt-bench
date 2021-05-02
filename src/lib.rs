@@ -1,3 +1,5 @@
+use std::{fs::File, io::{self, LineWriter, Write}, path::Path};
+
 use perfcnt::linux::{CacheId, CacheOpId, CacheOpResultId, PerfCounterBuilderLinux as Builder};
 use perfcnt::linux::{HardwareEventType as Hardware, SoftwareEventType as Software};
 use perfcnt::{AbstractPerfCounter, PerfCounter};
@@ -7,6 +9,7 @@ pub extern crate perfcnt;
 pub struct PerfCounters {
     pid: i32,
     counters: Vec<(String, PerfCounter)>,
+    results: Vec<(String, u64)>,
 }
 
 impl PerfCounters {
@@ -14,6 +17,7 @@ impl PerfCounters {
         PerfCounters {
             pid,
             counters: vec![],
+            results: vec![],
         }
     }
     pub fn for_this_process() -> Self {
@@ -136,6 +140,7 @@ impl PerfCounters {
             } else {
                 match pc.read() {
                     Ok(num) => {
+                        self.results.push((c.to_owned(), num));
                         println!("{}\t{}", c, num)
                     }
                     Err(e) => {
@@ -145,6 +150,31 @@ impl PerfCounters {
             }
         }
         res
+    }
+    pub fn save_result<P: AsRef<Path>>(&mut self, path: P) -> io::Result<&mut Self> {
+        if self.results.is_empty() {
+            println!("No results to sav");
+        } else {
+            let file = File::create(path)?;
+            let mut file = LineWriter::new(file);
+            let head_line = self
+                .results
+                .iter()
+                .map(|(s, _)| s.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            let result_line = self
+                .results
+                .iter()
+                .map(|(_, n)| format!("{}", n))
+                .collect::<Vec<_>>()
+                .join(",");
+            file.write(head_line.as_bytes())?;
+            file.write(b"\n")?;
+            file.write(result_line.as_bytes())?;
+            file.flush()?;
+        }
+        return Ok(self);
     }
 }
 
@@ -158,8 +188,6 @@ fn all_cache_res() -> [CacheOpResultId; 2] {
 
 #[cfg(test)]
 mod tests {
-    use std::thread;
-
     use perfcnt::linux::{HardwareEventType, SoftwareEventType};
 
     use crate::PerfCounters;
