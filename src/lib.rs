@@ -112,7 +112,7 @@ impl PerfCounters {
     }
     pub fn bench<F, R>(&mut self, func: F) -> R
     where
-        F: Fn() -> R,
+        F: FnOnce() -> R,
     {
         for (c, pc) in &mut self.counters {
             let _ = pc.reset();
