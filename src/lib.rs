@@ -1,7 +1,8 @@
 use perfcnt::linux::{CacheId, CacheOpId, CacheOpResultId, PerfCounterBuilderLinux as Builder};
 use perfcnt::linux::{HardwareEventType as Hardware, SoftwareEventType as Software};
 use perfcnt::{AbstractPerfCounter, PerfCounter};
-use std::process;
+
+pub extern crate perfcnt;
 
 pub struct PerfCounters {
     pid: i32,
