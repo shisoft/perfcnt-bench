@@ -25,18 +25,22 @@ impl PerfCounters {
         self.counters.append(
             &mut events
                 .into_iter()
-                .map(|event| {
-                    (
-                        format!("{:?}", event),
-                        Builder::from_software_event(event)
-                            .for_pid(self.pid)
-                            .inherit()
-                            .on_all_cpus()
-                            .exclude_kernel()
-                            .exclude_idle()
-                            .finish()
-                            .expect("Could not create counter"),
-                    )
+                .filter_map(|event| {
+                    let name = format!("{:?}", event);
+                    match Builder::from_software_event(event)
+                        .for_pid(self.pid)
+                        .inherit()
+                        .on_all_cpus()
+                        .exclude_kernel()
+                        .exclude_idle()
+                        .finish()
+                    {
+                        Ok(pc) => Some((name, pc)),
+                        Err(e) => {
+                            println!("Could not create {}, reason '{:?}'", name, e);
+                            None
+                        }
+                    }
                 })
                 .collect(),
         );
@@ -46,18 +50,22 @@ impl PerfCounters {
         self.counters.append(
             &mut events
                 .into_iter()
-                .map(|event| {
-                    (
-                        format!("{:?}", event),
-                        Builder::from_hardware_event(event)
-                            .for_pid(self.pid)
-                            .inherit()
-                            .on_all_cpus()
-                            .exclude_kernel()
-                            .exclude_idle()
-                            .finish()
-                            .expect("Could not create counter"),
-                    )
+                .filter_map(|event| {
+                    let name = format!("{:?}", event);
+                    match Builder::from_hardware_event(event)
+                        .for_pid(self.pid)
+                        .inherit()
+                        .on_all_cpus()
+                        .exclude_kernel()
+                        .exclude_idle()
+                        .finish()
+                    {
+                        Ok(pc) => Some((name, pc)),
+                        Err(e) => {
+                            println!("Could not create {}, reason '{:?}'", name, e);
+                            None
+                        }
+                    }
                 })
                 .collect(),
         );
@@ -80,7 +88,7 @@ impl PerfCounters {
         {
             Ok(pc) => {
                 self.counters.push((name, pc));
-            },
+            }
             Err(e) => {
                 println!("Could not create {}, reason '{:?}'", name, e);
             }
@@ -160,7 +168,10 @@ mod tests {
     fn it_works() {
         let mut bencher = PerfCounters::for_this_process();
         bencher
-            .with_hardware_events(vec![HardwareEventType::Instructions, HardwareEventType::CPUCycles])
+            .with_hardware_events(vec![
+                HardwareEventType::Instructions,
+                HardwareEventType::CPUCycles,
+            ])
             .with_software_events(vec![SoftwareEventType::TaskClock])
             .with_all_tlb_cache_events()
             .with_all_mem_cache_events()
