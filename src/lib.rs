@@ -11,11 +11,14 @@ pub struct PerfCounters {
 impl PerfCounters {
     pub fn for_pid(pid: i32) -> Self {
         PerfCounters {
-            pid, counters: vec![]
+            pid,
+            counters: vec![],
         }
     }
     pub fn for_this_process() -> Self {
-        Self::for_pid(process::id() as i32)
+        let pid = unsafe { libc::getpid() };
+        println!("Current pid is: {}", pid);
+        Self::for_pid(pid)
     }
     pub fn with_software_events(&mut self, events: Vec<Software>) -> &mut Self {
         self.counters.append(
@@ -25,10 +28,13 @@ impl PerfCounters {
                     (
                         format!("{:?}", event),
                         Builder::from_software_event(event)
-                        .on_all_cpus()
-                        .for_pid(self.pid)
-                        .finish()
-                        .expect("Could not create counter")
+                            .for_pid(self.pid)
+                            .inherit()
+                            .on_all_cpus()
+                            .exclude_kernel()
+                            .exclude_idle()
+                            .finish()
+                            .expect("Could not create counter"),
                     )
                 })
                 .collect(),
@@ -43,10 +49,13 @@ impl PerfCounters {
                     (
                         format!("{:?}", event),
                         Builder::from_hardware_event(event)
-                        .on_all_cpus()
-                        .for_pid(self.pid)
-                        .finish()
-                        .expect("Could not create counter")
+                            .for_pid(self.pid)
+                            .inherit()
+                            .on_all_cpus()
+                            .exclude_kernel()
+                            .exclude_idle()
+                            .finish()
+                            .expect("Could not create counter"),
                     )
                 })
                 .collect(),
@@ -59,16 +68,23 @@ impl PerfCounters {
         cache_op_id: CacheOpId,
         cache_op_result_id: CacheOpResultId,
     ) -> &mut Self {
-        self.counters.push(
-            (
-                format!("{:?}_{:?}_{:?}", cache_id, cache_op_id, cache_op_result_id),
-                Builder::from_cache_event(cache_id, cache_op_id, cache_op_result_id)
-                .on_all_cpus()
-                .for_pid(self.pid)
-                .finish()
-                .expect("Could not create counter"),
-            )
-        );
+        let name = format!("{:?}_{:?}_{:?}", cache_id, cache_op_id, cache_op_result_id);
+        match Builder::from_cache_event(cache_id, cache_op_id, cache_op_result_id)
+            .for_pid(self.pid)
+            .inherit()
+            .on_all_cpus()
+            .exclude_kernel()
+            .exclude_idle()
+            .finish()
+        {
+            Ok(pc) => {
+                self.counters.push((name, pc));
+            },
+            Err(e) => {
+                println!("Could not create {}, reason '{:?}'", name, e);
+            }
+        }
+
         self
     }
     pub fn with_all_cache_events_for(&mut self, events: &[CacheId]) -> &mut Self {
@@ -84,29 +100,22 @@ impl PerfCounters {
         self
     }
     pub fn with_all_mem_cache_events(&mut self) -> &mut Self {
-        self.with_all_cache_events_for(&[
-            CacheId::L1D,
-            CacheId::L1I,
-            CacheId::LL,
-            CacheId::NODE
-        ])
+        self.with_all_cache_events_for(&[CacheId::L1D, CacheId::L1I, CacheId::LL, CacheId::NODE])
     }
 
     pub fn with_all_tlb_cache_events(&mut self) -> &mut Self {
-        self.with_all_cache_events_for(&[
-            CacheId::DTLB
-        ])
+        self.with_all_cache_events_for(&[CacheId::DTLB])
     }
 
     pub fn with_all_branch_prediction_events(&mut self) -> &mut Self {
-        self.with_all_cache_events_for(&[
-            CacheId::BPU
-        ])
+        self.with_all_cache_events_for(&[CacheId::BPU])
     }
-    pub fn bench<F, R>(&mut self, func: F) -> R 
-        where F: Fn() -> R
+    pub fn bench<F, R>(&mut self, func: F) -> R
+    where
+        F: Fn() -> R,
     {
         for (c, pc) in &mut self.counters {
+            let _ = pc.reset();
             if let Err(e) = pc.start() {
                 println!("Cannot start {}, reason: {}", c, e);
             }
@@ -124,9 +133,6 @@ impl PerfCounters {
                         println!("Cannot read {}, reason: {}", c, e)
                     }
                 }
-                if let Err(e) = pc.reset() {
-                    println!("Cannot reset {}, reason: {}", c, e);
-                }
             }
         }
         res
@@ -134,24 +140,35 @@ impl PerfCounters {
 }
 
 fn all_cache_ops() -> [CacheOpId; 3] {
-    [
-        CacheOpId::Read,
-        CacheOpId::Write,
-        CacheOpId::Prefetch
-    ]
+    [CacheOpId::Read, CacheOpId::Write, CacheOpId::Prefetch]
 }
 
 fn all_cache_res() -> [CacheOpResultId; 2] {
-    [
-        CacheOpResultId::Access,
-        CacheOpResultId::Miss
-    ]
+    [CacheOpResultId::Access, CacheOpResultId::Miss]
 }
 
 #[cfg(test)]
 mod tests {
+    use std::thread;
+
+    use perfcnt::linux::{HardwareEventType, SoftwareEventType};
+
+    use crate::PerfCounters;
+
     #[test]
     fn it_works() {
-        assert_eq!(2 + 2, 4);
+        let mut bencher = PerfCounters::for_this_process();
+        bencher
+            .with_hardware_events(vec![HardwareEventType::Instructions, HardwareEventType::CPUCycles])
+            .with_software_events(vec![SoftwareEventType::TaskClock])
+            .with_all_tlb_cache_events()
+            .with_all_mem_cache_events()
+            .bench(|| {
+                let mut a = 0;
+                for i in 0..100 {
+                    a += i;
+                }
+                println!("{}", a);
+            });
     }
 }
